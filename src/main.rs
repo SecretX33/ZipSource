@@ -1,4 +1,5 @@
 mod chars;
+mod zs_log;
 
 use std::{env, fs, io, thread};
 use std::collections::HashSet;
@@ -17,13 +18,14 @@ use zip::{CompressionMethod, ZipWriter};
 use zip::result::ZipResult;
 use zip::write::FileOptions;
 use crate::chars::unescape;
+use crate::zs_log::init_log;
 
 /// After some experimentation, on my machine this number was the fastest, no deep reason why
 /// it is this, though.
 const MAX_CONCURRENT_THREADS: usize = 9;
 
 fn main() {
-    pretty_env_logger::init();
+    init_log();
 
     info!("Started collecting files");
 
@@ -40,7 +42,7 @@ fn main() {
     zip_files(&settings.zip_path, &settings.base_dir, valid_files).expect("Creation of zip failed");
 
     let file_size = pretty_file_size(&settings.zip_path).expect("Could not read zip file info");
-    println!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"))
+    info!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"))
 }
 
 fn get_settings() -> Settings {
@@ -168,8 +170,6 @@ fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResu
     let options = FileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .compression_level(Option::from(5));
-
-    println!();
 
     for (i, x) in files.iter().enumerate() {
         let relative_path = pathdiff::diff_paths(x, base_dir).unwrap();
