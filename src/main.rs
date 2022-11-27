@@ -1,5 +1,6 @@
 mod chars;
-mod zs_log;
+#[macro_use]
+mod log_macros;
 
 use std::{env, fs, io, thread};
 use std::collections::HashSet;
@@ -10,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicU32, Ordering};
-use log::{debug, info, warn};
 use size::{Size, Style};
 use threadpool::ThreadPool;
 use walkdir::{WalkDir};
@@ -18,31 +18,28 @@ use zip::{CompressionMethod, ZipWriter};
 use zip::result::ZipResult;
 use zip::write::FileOptions;
 use crate::chars::unescape;
-use crate::zs_log::init_log;
 
 /// After some experimentation, on my machine this number was the fastest, no deep reason why
 /// it is this, though.
 const MAX_CONCURRENT_THREADS: usize = 9;
 
 fn main() {
-    init_log();
-
-    info!("Started collecting files");
+    log!("Started collecting files");
 
     let settings = get_settings();
-    debug!("Settings: {:?}", settings);
+    debug_log!("Settings: {:?}", settings);
 
     let all_files = list_files_recursive(&settings.base_dir);
     let all_files_path = all_files.iter().map(|p| p.as_path()).collect();
-    info!("Found a total of {} files in the folder.", all_files.len());
+    log!("Found a total of {} files in the folder.", all_files.len());
 
     let valid_files = filter_valid_files(&settings.base_dir, all_files_path);
-    info!("There are {} files to be zipped (out of {}, which means {} files were ignored)", valid_files.len(), all_files.len(), all_files.len() - valid_files.len());
+    log!("There are {} files to be zipped (out of {}, which means {} files were ignored)", valid_files.len(), all_files.len(), all_files.len() - valid_files.len());
 
     zip_files(&settings.zip_path, &settings.base_dir, valid_files).expect("Creation of zip failed");
 
     let file_size = pretty_file_size(&settings.zip_path).expect("Could not read zip file info");
-    info!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"))
+    log!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"));
 }
 
 fn get_settings() -> Settings {
@@ -82,7 +79,7 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
 
     let chunks_amount = files_chunked.len();
     let pool_size = calculate_ideal_parallelism(chunks_amount);
-    debug!("There are {} chunks of files to be processed (thread pool size: {})", chunks_amount, pool_size);
+    debug_log!("There are {} chunks of files to be processed (thread pool size: {})", chunks_amount, pool_size);
 
     let pool = ThreadPool::new(pool_size);
     let count = Arc::from(AtomicU32::new(0));
@@ -97,7 +94,7 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
             let files_path: HashSet<&Path> = files.iter().map(|p| p.as_path()).collect();
             let mut command = build_check_ignore_command(&current_dir, &files_path);
             let ignored_files = run_ignored_files_command(&mut command);
-            debug!("[{}] Chunk size: {}, ignored files size: {}", count.fetch_add(1, Ordering::Relaxed), files.len(), ignored_files.len());
+            debug_log!("[{}] Chunk size: {}, ignored files size: {}", count.fetch_add(1, Ordering::Relaxed), files.len(), ignored_files.len());
 
             tx.send(ignored_files).expect("channel will be there waiting for the pool");
         });
@@ -110,7 +107,7 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
     let ignored_files: HashSet<_> = rx.iter().take(chunks_amount).flatten().collect();
     let ignored_files: HashSet<&Path> = ignored_files.iter().map(|e| e.as_path()).collect();
 
-    debug!("\nall_files: {:?}\nignored_files: {:?}\n",
+    debug_log!("\nall_files: {:?}\nignored_files: {:?}\n",
         all_files.iter().take(6).collect::<Vec<_>>(),
         ignored_files.iter().take(6).collect::<Vec<_>>()
     );
@@ -120,7 +117,7 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
         .filter(|&path| !ignored_files.contains(path) && !is_excluded_specially(current_dir, path))
         .collect();
 
-    debug!(
+    debug_log!(
         "ignored_files: {}, all_files_vector size: {}, valid_files size: {}",
         ignored_files.len(),
         all_files_vector.len(),
@@ -160,7 +157,7 @@ fn is_excluded_specially(current_dir: &Path, file_to_check: &Path) -> bool {
 fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResult<()> {
     if zip_path.exists() {
         let filename = zip_path.file_name().and_then(|n| n.to_str()).unwrap();
-        warn!("Removing old zip file: {}", filename);
+        log!("WARN: Removing old zip file: {}", filename);
         fs::remove_file(&zip_path).expect(&format!("Failed to delete zip file: {}", filename));
     }
     let zip_file = File::create(&zip_path).unwrap();
@@ -176,7 +173,7 @@ fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResu
         zip.start_file(relative_path.to_str().unwrap(), options)?;
         zip.write_all(&*fs::read(x)?)?;
 
-        debug!("{}. Zipping file: {}", i + 1, x.to_str().unwrap_or("<invalid_utf8_name>"));
+        debug_log!("{}. Zipping file: {}", i + 1, x.to_str().unwrap_or("<invalid_utf8_name>"));
     }
 
     zip.finish().map(|_| ())
@@ -196,11 +193,11 @@ fn calculate_ideal_parallelism(job_amount: usize) -> usize {
     let available_parallelism = thread::available_parallelism();
 
     if let Err(error) = &available_parallelism {
-        warn!("Could not determine the number of CPU cores this processor has, ZipSource will fallback to single-threaded mode, which can be quite slow.\nError message: {error}");
+        log!("WARN: Could not determine the number of CPU cores this processor has, ZipSource will fallback to single-threaded mode, which can be quite slow.\nError message: {error}");
     }
 
     let cores: usize = available_parallelism.ok().unwrap_or(NonZeroUsize::new(1).unwrap()).get();
-    debug!("System Core Count: {cores}");
+    debug_log!("System Core Count: {cores}");
     MAX_CONCURRENT_THREADS.min(job_amount).max(1).min(cores)
 }
 
