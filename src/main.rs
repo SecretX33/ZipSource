@@ -3,14 +3,13 @@ mod chars;
 use std::{env, fs, io, thread};
 use std::collections::HashSet;
 use std::fs::{File};
-use std::io::Write;
+use std::io::{Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicU32, Ordering};
 use log::{debug, info, warn};
-use pretty_env_logger::env_logger::Target;
 use size::{Size, Style};
 use threadpool::ThreadPool;
 use walkdir::{WalkDir};
@@ -28,38 +27,41 @@ fn main() {
 
     info!("Started collecting files");
 
-    let base_dir = get_base_dir();
+    let settings = get_settings();
+    debug!("Settings: {:?}", settings);
 
-    let all_files = list_files_recursive(&base_dir);
+    let all_files = list_files_recursive(&settings.base_dir);
     let all_files_path = all_files.iter().map(|p| p.as_path()).collect();
     info!("Found a total of {} files in the folder.", all_files.len());
 
-    let valid_files = filter_valid_files(&base_dir, all_files_path);
+    let valid_files = filter_valid_files(&settings.base_dir, all_files_path);
     info!("There are {} files to be zipped (out of {}, which means {} files were ignored)", valid_files.len(), all_files.len(), all_files.len() - valid_files.len());
 
-    let folder_name = base_dir.file_name().and_then(|n| n.to_str())
-        .map(|n| n.to_string())
-        .unwrap();
-    let zip_path = base_dir.clone().join(folder_name + " (Source Code).zip");
+    zip_files(&settings.zip_path, &settings.base_dir, valid_files).expect("Creation of zip failed");
 
-    zip_files(&zip_path, &base_dir, valid_files).expect("Creation of zip failed");
-
-    let file_size = pretty_file_size(&zip_path).expect("Could not read zip file info");
+    let file_size = pretty_file_size(&settings.zip_path).expect("Could not read zip file info");
     println!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"))
 }
 
-/// Get the base directory that should be used in this program based on the first console argument
-/// (which should be a path), and if not provided then it defaults to the current directory.
-fn get_base_dir() -> PathBuf {
+fn get_settings() -> Settings {
     let args: Vec<_> = env::args().into_iter().skip(1).collect();
 
-    // If user provided the base path, let's use it
-    if let Some(arg_path) = args.first() {
-        return PathBuf::from(arg_path);
-    }
+    let base_dir = args.first().map(PathBuf::from)
+        .or(env::current_dir().ok())
+        .expect("Could not determine base directory setting");
 
-    // User didn't provide the base path, default to current directory
-    env::current_dir().expect("Current dir is not set")
+    let zip_name = args.get(1).cloned().or(
+        base_dir.file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| format!("{name} (Source Code).zip"))
+    ).expect("Could not determine zip name setting");
+
+    let zip_path = base_dir.join(&zip_name);
+
+    Settings {
+        base_dir,
+        zip_path,
+    }
 }
 
 fn list_files_recursive(directory: &Path) -> HashSet<PathBuf> {
@@ -87,10 +89,11 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
     for files in files_chunked {
         let tx = tx.clone();
         let count = Arc::clone(&count);
+        let current_dir = current_dir.to_path_buf();
 
         pool.execute(move|| {
-            let test: HashSet<&Path> = files.iter().map(|p| p.as_path()).collect();
-            let mut command = build_check_ignore_command(&test);
+            let files_path: HashSet<&Path> = files.iter().map(|p| p.as_path()).collect();
+            let mut command = build_check_ignore_command(&current_dir, &files_path);
             let ignored_files = run_ignored_files_command(&mut command);
             debug!("[{}] Chunk size: {}, ignored files size: {}", count.fetch_add(1, Ordering::Relaxed), files.len(), ignored_files.len());
 
@@ -101,15 +104,14 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
     // Await for all jobs to finish
     pool.join();
 
-    // Destroy the thread pool eagerly
-    drop(pool);
-
     // Collect their results
     let ignored_files: HashSet<_> = rx.iter().take(chunks_amount).flatten().collect();
     let ignored_files: HashSet<&Path> = ignored_files.iter().map(|e| e.as_path()).collect();
 
-    debug!("\nall_files: {:?}", all_files.iter().take(8).collect::<Vec<_>>());
-    debug!("\nignored_files: {:?}\n\n", ignored_files.iter().take(8).collect::<Vec<_>>());
+    debug!("\nall_files: {:?}\nignored_files: {:?}\n",
+        all_files.iter().take(6).collect::<Vec<_>>(),
+        ignored_files.iter().take(6).collect::<Vec<_>>()
+    );
 
     let valid_files: HashSet<&Path> = all_files_vector.iter()
         .copied()
@@ -125,7 +127,7 @@ fn filter_valid_files<'a>(current_dir: &Path, all_files: HashSet<&'a Path>) -> H
     valid_files
 }
 
-fn build_check_ignore_command(files: &HashSet<&Path>) -> Command {
+fn build_check_ignore_command(current_dir: &Path, files: &HashSet<&Path>) -> Command {
     let path_list: Vec<&str> = files.iter()
         .filter_map(|path| path.to_str())
         .collect();
@@ -134,7 +136,7 @@ fn build_check_ignore_command(files: &HashSet<&Path>) -> Command {
     let args = [[first_arg, "git", "check-ignore"].as_slice(), path_list.as_slice()].concat();
 
     let mut command = Command::new(cmd);
-    command.args(args);
+    command.current_dir(current_dir).args(args);
     command
 }
 
@@ -148,17 +150,18 @@ fn run_ignored_files_command(command: &mut Command) -> HashSet<PathBuf> {
 }
 
 fn is_excluded_specially(current_dir: &Path, file_to_check: &Path) -> bool {
-    let paths_to_exclude = [current_dir.to_path_buf().join(".git")];
+    let paths_to_exclude = [current_dir.join(".git")];
 
     paths_to_exclude.iter().any(|p| file_to_check.starts_with(p))
 }
 
-fn zip_files(filename: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResult<()> {
-    if filename.exists() {
-        warn!("Removing old zip file: {}", filename.file_name().unwrap().to_str().unwrap());
-        fs::remove_file(filename).expect(&format!("Failed to delete zip file: {}", filename.to_str().unwrap()));
+fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResult<()> {
+    if zip_path.exists() {
+        let filename = zip_path.file_name().and_then(|n| n.to_str()).unwrap();
+        warn!("Removing old zip file: {}", filename);
+        fs::remove_file(&zip_path).expect(&format!("Failed to delete zip file: {}", filename));
     }
-    let zip_file = File::create(filename).unwrap();
+    let zip_file = File::create(&zip_path).unwrap();
 
     let mut zip = ZipWriter::new(zip_file);
 
@@ -190,7 +193,19 @@ fn pretty_file_size(file: &Path) -> io::Result<String> {
 /// Returns a number that is not greater than the number of processor cores of this machine,
 /// and also not greater than the `job_amount`.
 fn calculate_ideal_parallelism(job_amount: usize) -> usize {
-    let cores = thread::available_parallelism().ok().unwrap_or(NonZeroUsize::new(1).unwrap()).get();
+    let available_parallelism = thread::available_parallelism();
+
+    if let Err(error) = &available_parallelism {
+        warn!("Could not determine the number of CPU cores this processor has, ZipSource will fallback to single-threaded mode, which can be quite slow.\nError message: {error}");
+    }
+
+    let cores: usize = available_parallelism.ok().unwrap_or(NonZeroUsize::new(1).unwrap()).get();
     debug!("System Core Count: {cores}");
     MAX_CONCURRENT_THREADS.min(job_amount).max(1).min(cores)
+}
+
+#[derive(Clone, Debug)]
+struct Settings {
+    base_dir: PathBuf,
+    zip_path: PathBuf,
 }
