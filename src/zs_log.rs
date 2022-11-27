@@ -1,12 +1,14 @@
 use log::Level;
 use pretty_env_logger::{formatted_builder};
 use pretty_env_logger::env_logger::fmt::{Color, Style, StyledValue};
+use pretty_env_logger::env_logger::Target;
 
 const LOG_ENV_VAR: &str = "RUST_LOG";
 
 /// Initialize application logger.
 pub fn init_log() {
     let mut builder = formatted_builder();
+    builder.target(Target::Stdout);
 
     builder.format(|f, record| {
         use std::io::Write;
