@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::SystemTime;
 use size::{Size, Style};
 use threadpool::ThreadPool;
 use walkdir::{WalkDir};
@@ -24,22 +25,27 @@ use crate::chars::unescape;
 const MAX_CONCURRENT_THREADS: usize = 9;
 
 fn main() {
-    log!("Started collecting files");
+    let start = SystemTime::now();
+
+    log!("Started collecting files.");
 
     let settings = get_settings();
     debug_log!("Settings: {:?}", settings);
 
     let all_files = list_files_recursive(&settings.base_dir);
     let all_files_path = all_files.iter().map(|p| p.as_path()).collect();
-    log!("Found a total of {} files in the folder.", all_files.len());
 
     let valid_files = filter_valid_files(&settings.base_dir, all_files_path);
-    log!("There are {} files to be zipped (out of {}, which means {} files were ignored)", valid_files.len(), all_files.len(), all_files.len() - valid_files.len());
+    let ignored_files_percent = (((all_files.len() - valid_files.len()) as f64) / all_files.len() as f64) * 100.0;
+    log!("Found {} files in the folder, {} will be zipped ({:.1}% will be skipped).", all_files.len(), valid_files.len(), ignored_files_percent);
 
-    zip_files(&settings.zip_path, &settings.base_dir, valid_files).expect("Creation of zip failed");
+    zip_files(&settings.zip_path, &settings.base_dir, valid_files).expect("Creation of zip failed.");
 
-    let file_size = pretty_file_size(&settings.zip_path).expect("Could not read zip file info");
-    log!("Zip was successfully created (file size is {})!", file_size.replace("iB", "B"));
+    let file_size = pretty_file_size(&settings.zip_path).expect("Could not read zip file metadata.");
+
+    let end = SystemTime::now();
+    let duration = end.duration_since(start).unwrap();
+    log!("Zip was successfully created (file size is {}, took {}s).", file_size.replace("iB", "B"), duration.as_secs());
 }
 
 fn get_settings() -> Settings {
@@ -47,13 +53,13 @@ fn get_settings() -> Settings {
 
     let base_dir = args.first().map(PathBuf::from)
         .or(env::current_dir().ok())
-        .expect("Could not determine base directory setting");
+        .expect("Could not determine base directory setting.");
 
     let zip_name = args.get(1).cloned().or(
         base_dir.file_name()
             .and_then(|name| name.to_str())
             .map(|name| format!("{name} (Source Code).zip"))
-    ).expect("Could not determine zip name setting");
+    ).expect("Could not determine zip name setting.");
 
     let zip_path = base_dir.join(&zip_name);
 
@@ -140,11 +146,11 @@ fn build_check_ignore_command(current_dir: &Path, files: &HashSet<&Path>) -> Com
 }
 
 fn run_ignored_files_command(command: &mut Command) -> HashSet<PathBuf> {
-    let output = command.output().expect("Failed to execute process");
+    let output = command.output().expect("Failed to execute process.");
 
     String::from_utf8_lossy(&output.stdout).trim()
         .split("\n")
-        .map(|e| PathBuf::from(unescape(&e.to_string()).expect("Invalid path was found")))
+        .map(|e| PathBuf::from(unescape(&e.to_string()).expect("Invalid path was found.")))
         .collect()
 }
 
@@ -157,7 +163,7 @@ fn is_excluded_specially(current_dir: &Path, file_to_check: &Path) -> bool {
 fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResult<()> {
     if zip_path.exists() {
         let filename = zip_path.file_name().and_then(|n| n.to_str()).unwrap();
-        log!("WARN: Removing old zip file: {}", filename);
+        log!("WARN: Removing old zip file '{}'.", filename);
         fs::remove_file(&zip_path).expect(&format!("Failed to delete zip file: {}", filename));
     }
     let zip_file = File::create(&zip_path).unwrap();
