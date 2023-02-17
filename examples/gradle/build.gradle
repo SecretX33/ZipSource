@@ -1,0 +1,39 @@
+plugins {
+    //...
+    id "com.github.johnrengelman.shadow" version "7.1.2"
+}
+
+group = "com.example"
+version = "0.0.1"
+
+repositories {
+    //...
+}
+
+dependencies {
+    //...
+}
+
+// Creates a .zip file with the project jars
+task createZipJars(type: Zip) {
+    dependsOn ":shadowJar"
+    group = "distribution"
+
+    archiveFileName = "${rootProject.name}.zip"
+    destinationDirectory = file("$projectDir")
+
+    include "*.jar"
+    from(buildDir.resolve("libs"))
+}
+
+// Creates a .zip with the project source code
+task createZipSource(type: Exec) {
+    group = "distribution"
+    workingDir projectDir
+    commandLine "tools/zipsource"
+}
+
+tasks.register("dist") {
+    dependsOn createZipJars, createZipSource
+    group = "distribution"
+}

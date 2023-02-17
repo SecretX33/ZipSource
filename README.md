@@ -12,7 +12,7 @@ ZipSource supports Windows and Linux (but technically works and can be compiled 
 ## Use-case
 The inspiration for this project is that I worked with a client that didn't use GitHub, but still demanded the source code of the private project. Without this tool, I had to manually zip the entire folder, then delete the binary files from it, every, single, time. With this tool, I just run the command and let it do its thing.
 
-And because it is a CLI application, you can use it in conjunction with any other tool that is compatible. Going back to the previous example, I wrote a small `Exec` task in Gradle (Java's build tool) to run ZipSource on the project's folder.
+And because it is a CLI application, you can use it in conjunction with any other tool that is compatible. Going back to the previous example, I wrote a small `Exec` task in Gradle (Java's build tool) to run ZipSource on the project's folder (example code can be seen [here](examples/gradle)).
 
 ## Instructions
 
