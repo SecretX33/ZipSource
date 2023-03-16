@@ -1,0 +1,181 @@
+name: Compile for OS
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_toolchain:
+        description: Select what rust toolchain to use
+        type: choice
+        required: true
+        default: x86_64-unknown-linux-gnu
+        options:
+          - i686-pc-windows-msvc
+          - x86_64-pc-windows-msvc
+          - x86_64-unknown-linux-gnu
+          - x86_64-apple-darwin
+  workflow_call:
+    inputs:
+      target_toolchain:
+        description: Select what rust toolchain to use
+        type: string
+        required: true
+
+env:
+  CARGO_REGISTRY: https://github.com/rust-lang/crates.io-index
+  CARGO_TARGET_DIR: target
+  CARGO_TERM_COLOR: always
+
+jobs:
+  os_info:
+    runs-on: ubuntu-latest
+    name: Infer OS infos
+    outputs:
+      os_name: ${{ steps.os_name.outputs.os_name }}
+      os_name_pretty: ${{ steps.os_name_pretty.outputs.os_name_pretty }}
+      runs_on_os_name: ${{ steps.runs_on_os_name.outputs.runs_on_os_name }}
+      architecture_bits: ${{ steps.architecture_bits.outputs.architecture_bits }}
+    steps:
+      - name: Infer OS name
+        id: os_name
+        run: |
+          toolchain=$(echo "${{ inputs.target_toolchain }}" | tr '[:upper:]' '[:lower:]')
+          echo Toolchain: $toolchain
+          if [[ "$toolchain" = *-windows-* ]]; then
+            os_name=windows
+          elif [[ "$toolchain" = *-linux-* ]]; then
+            os_name=linux
+          elif [[ "$toolchain" = *-apple-darwin* ]]; then
+            os_name=macos
+          else 
+            echo Error: toolchain '${{ inputs.target_toolchain }}' has no corresponding OS mapped in the build pipeline.
+            exit 1
+          fi
+          echo OS inferred was: $os_name
+          echo "os_name=$os_name" >> $GITHUB_OUTPUT
+
+      - name: Infer pretty OS name
+        id: os_name_pretty
+        run: |
+          os_name=$(echo "${{ steps.os_name.outputs.os_name }}" | tr '[:upper:]' '[:lower:]')
+          echo OS name: $os_name
+          if [ "$os_name" = "windows" ]; then
+            os_name_pretty=Windows
+          elif [ "$os_name" = "linux" ]; then
+            os_name_pretty=Linux
+          elif [ "$os_name" = "macos" ]; then
+            os_name_pretty=MacOS
+          else
+            echo Error: OS $os_name has no corresponding pretty OS name mapped in the build pipeline.
+            exit 1
+          fi
+          echo Pretty OS inferred was: $os_name_pretty
+          echo "os_name_pretty=$os_name_pretty" >> $GITHUB_OUTPUT
+
+      - name: Infer runs on OS name
+        id: runs_on_os_name
+        run: |
+          os_name=$(echo "${{ steps.os_name.outputs.os_name }}" | tr '[:upper:]' '[:lower:]')
+          echo OS name: $os_name
+          if [ "$os_name" = "windows" ]; then
+            runs_on_os_name=windows-latest
+          elif [ "$os_name" = "linux" ]; then
+            runs_on_os_name=ubuntu-latest
+          elif [ "$os_name" = "macos" ]; then
+            runs_on_os_name=macos-latest
+          else 
+            echo Error: OS $os_name has no corresponding runs on os mapped in the build pipeline.
+            exit 1
+          fi
+          echo Runs on OS inferred was: $runs_on_os_name
+          echo "runs_on_os_name=$runs_on_os_name" >> $GITHUB_OUTPUT
+
+      - name: Infer architecture bits
+        id: architecture_bits
+        run: |
+          toolchain=$(echo "${{ inputs.target_toolchain }}" | tr '[:upper:]' '[:lower:]')
+          echo Toolchain: $toolchain
+          if [[ "$toolchain" == i686-* ]]; then
+            architecture_bits=x32
+          elif [[ "$toolchain" == x86_64-* ]]; then
+            architecture_bits=x64
+          elif [[ "$toolchain" == aarch64-* ]]; then
+            architecture_bits=Arm64
+          else
+            echo Error: toolchain '${{ inputs.target_toolchain }}' has no architecture mapped in the build pipeline.
+            exit 1
+          fi
+          echo Architecture inferred was: $architecture_bits
+          echo "architecture_bits=$architecture_bits" >> $GITHUB_OUTPUT
+  
+  build_variables:
+    runs-on: ubuntu-latest
+    name: Build variables
+    needs:
+      - os_info
+    outputs:
+      binary_name: ${{ steps.binary_name.outputs.binary_name }}
+      release_folder: ${{ steps.release_folder.outputs.release_folder }}
+    steps:
+      - name: Generate final binary name
+        id: binary_name
+        run: |
+          binary_name=$(echo ZipSource.${{ needs.os_info.outputs.architecture_bits }}.${{ needs.os_info.outputs.os_name_pretty }}.zip) 
+          echo Binary name: $binary_name
+          echo "binary_name=$binary_name" >> $GITHUB_OUTPUT
+      
+      - name: Generate release folder path
+        id: release_folder
+        run: |
+          release_folder=$(echo target/${{ inputs.target_toolchain }}/release) 
+          echo Release folder: $release_folder
+          echo "release_folder=$release_folder" >> $GITHUB_OUTPUT
+
+  build:
+    runs-on: ${{ needs.os_info.outputs.runs_on_os_name }}
+    name: Build artifact
+    needs:
+      - os_info
+      - build_variables
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          profile: minimal
+
+      - name: Install Rust toolchain and dependencies
+        run: rustup target add ${{ inputs.target_toolchain }}
+
+      - name: Build for ${{ needs.os_info.outputs.os_name_pretty }}
+        run: cargo build --release --target ${{ inputs.target_toolchain }}
+          
+      - name: Zip binary (Windows)
+        if: needs.os_info.outputs.os_name == 'windows'
+        run: |
+          mkdir dist
+          echo "=== Release folder contents ==="
+          dir ${{ needs.build_variables.outputs.release_folder }}
+          echo "=== Zipping binary ==="
+          tar.exe -a -c -f ${{ needs.build_variables.outputs.release_folder }}\${{ needs.build_variables.outputs.binary_name }} -C ${{ needs.build_variables.outputs.release_folder }} zipsource.exe
+
+      - name: Zip binary (Linux/MacOS)
+        if: needs.os_info.outputs.os_name != 'windows'
+        run: |
+          mkdir -v -p dist
+          echo "=== Release folder contents ==="
+          ls -la ${{ needs.build_variables.outputs.release_folder }}
+          echo "=== Zipping binary ==="
+          zip -j ${{ needs.build_variables.outputs.release_folder }}/${{ needs.build_variables.outputs.binary_name }} ${{ needs.build_variables.outputs.release_folder }}/zipsource
+
+      - name: Move zipped binary
+        run: mv -v ${{ needs.build_variables.outputs.release_folder }}/${{ needs.build_variables.outputs.binary_name }} dist/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ needs.build_variables.outputs.binary_name }}
+          path: dist/${{ needs.build_variables.outputs.binary_name }}
+          if-no-files-found: error
