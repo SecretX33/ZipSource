@@ -1,11 +1,11 @@
 # ZipSource
-A way to quickly zip source code in a folder, written in Rust. It was made for the cases where you need to zip a project folder according to its `.gitignore` file. 
+A way to quickly zip source code in a folder, written in Rust. It was made for the cases where you need to zip only files that are part of your git repository, skipping excluded files and folders (according to the `.gitignore` file).
 
 The best part is: it's very easy to use, and really fast.
 
 ## Download
 
-ZipSource supports Windows and Linux (but technically works and can be compiled to MacOS too).
+ZipSource supports Windows (32 and 64 bits), Linux (64 bits), and MacOS (64 bits).
 
 [Click here](https://github.com/SecretX33/ZipSource/releases/latest) to download the precompiled executable for your OS.
 
