@@ -2,23 +2,23 @@ mod chars;
 #[macro_use]
 mod log_macros;
 
-use std::{env, fs, io, thread};
+use crate::chars::unescape;
+use size::{Size, Style};
 use std::collections::HashSet;
-use std::fs::{File};
-use std::io::{Write};
+use std::fs::File;
+use std::io::Write;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::SystemTime;
-use size::{Size, Style};
+use std::{env, fs, io, thread};
 use threadpool::ThreadPool;
-use walkdir::{WalkDir};
-use zip::{CompressionMethod, ZipWriter};
+use walkdir::WalkDir;
 use zip::result::ZipResult;
-use zip::write::FileOptions;
-use crate::chars::unescape;
+use zip::write::{SimpleFileOptions};
+use zip::{CompressionMethod, ZipWriter};
 
 /// After some experimentation, on my machine this number was the fastest, no deep reason why
 /// it is this, though.
@@ -170,7 +170,7 @@ fn zip_files(zip_path: &Path, base_dir: &Path, files: HashSet<&Path>) -> ZipResu
 
     let mut zip = ZipWriter::new(zip_file);
 
-    let options = FileOptions::default()
+    let options = SimpleFileOptions::default()
         .compression_method(CompressionMethod::Deflated)
         .compression_level(Option::from(5));
 
