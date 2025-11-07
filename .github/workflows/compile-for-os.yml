@@ -141,10 +141,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Set up Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921 # stable
         with:
           toolchain: stable
-          profile: minimal
 
       - name: Install Rust toolchain and dependencies
         run: rustup target add ${{ inputs.target_toolchain }}
@@ -174,7 +173,7 @@ jobs:
         run: mv -v ${{ needs.build_variables.outputs.release_folder }}/${{ needs.build_variables.outputs.binary_name }} dist/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ needs.build_variables.outputs.binary_name }}
           path: dist/${{ needs.build_variables.outputs.binary_name }}
